@@ -1,0 +1,12 @@
+{
+  "name": "mongo-loader",
+  "version": "1.0.0",
+  "description": "MongoDB loader",
+  "main": "app.js",
+  "author": "eucuepo",
+  "license": "ISC",
+  "dependencies": {
+    "async": "^1.5.2",
+    "mongodb": "^2.1.14"
+  }
+}
