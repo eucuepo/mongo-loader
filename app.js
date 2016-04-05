@@ -4,55 +4,66 @@ var url = 'mongodb://localhost:27017';
 
 // config
 var config = {
-	DB_URL: 'mongodb://localhost:27017', // DB base URL
-	DATABASE_NUMBER:100, // db number
-	COLLECTIONS_NUMBER:100, // collections on each db
-	OBJECTS_NUMBER:10, // objects on each collection
-	FIELDS_NUMBER:5, // fields on each object
-	ALLOW_SUBDOCS:false, // allow subdocuments on objects
-	MAX_CONCURRENCY:10 // max queue size
+  DB_URL: 'mongodb://localhost:27017', // DB base URL
+  DATABASE_NUMBER:100, // db number
+  COLLECTIONS_NUMBER:100, // collections on each db
+  OBJECTS_NUMBER:10, // objects on each collection
+  FIELDS_NUMBER:5, // fields on each object
+  ALLOW_SUBDOCS:false, // allow subdocuments on objects
+  MAX_DATABASE_CONCURRENCY:10, // max database creator queue size
+  MAX_COLLECTION_CONCURRENCY:10 // max collection creator queue size
 }
 
-var q = async.queue(function (task, taskDoneCallback) {
-    populateDB(taskDoneCallback);
-}, config.MAX_CONCURRENCY);
+var databaseQueue = async.queue(function (task, taskDoneCallback) {
+  populateDB(task.dbIndex,taskDoneCallback);
+}, config.MAX_DATABASE_CONCURRENCY);
 
 for(var i=0; i<config.DATABASE_NUMBER; i++){
-	q.push({});
+  databaseQueue.push({dbIndex:i});
 }
 
 // helper functions
 var insertDocument = function(db, collectionName,fields,allowSubdocs, callback) {
-   db.collection(collectionName).insertOne(createRandomObj(fields,allowSubdocs), function(err, result) {
+  db.collection(collectionName).insertOne(createRandomObj(fields,allowSubdocs), function(err, result) {
     callback();
   });
 };
 
-var populateDB = function(taskDoneCallback) {
-	// random db
-	var dbName = config.DB_URL + '/' + randomString(10);
-	console.log('Populating ' + dbName +' database');
-	
-	mongoClient.connect(dbName, function(err, db) {
-		async.times(config.COLLECTIONS_NUMBER, function(j, nextCollection){
-			var collectionName = randomString(10);
-			async.times(config.OBJECTS_NUMBER, function(k, nextObject){
-			  insertDocument(db, collectionName, config.FIELDS_NUMBER,config.ALLOW_SUBDOCS,
-			   function() {
-			   	  console.log('document inserted');
-			      nextObject();
-			  });
-			},function(){
-				console.log('Collection created');
-				// objects completed
-				nextCollection();
-			});
-		}, function() {
-		  // collections done, close DB
-		  console.log('Closing db for ' + db.databaseName);
-		  db.close();
-		  taskDoneCallback();
-		});
+var populateDB = function(dbIndex,taskDoneCallback) {
+  // random db
+  var dbName = config.DB_URL + '/' + randomString(10);
+  console.log('Populating ' + dbName +' database');
+  mongoClient.connect(dbName, function(err, db) {
+    var collectionQueue = async.queue(function (task, collectionDoneCallback) {
+	  populateCollection(collectionDoneCallback, task.db,task.colIndex,task.dbIndex);	
+	}, config.MAX_COLLECTION_CONCURRENCY);
+
+
+	collectionQueue.drain = function() {
+	  // once queue completed, close db connection
+	  console.log('Closing db connection for ' + db.databaseName);
+	  db.close();
+	  taskDoneCallback();
+	}
+
+	for(var j=0;j<config.COLLECTIONS_NUMBER;j++){
+	  collectionQueue.push({db:db,colIndex:j,dbIndex:dbIndex});
+	}
+
+  });
+}
+
+var populateCollection = function(collectionDoneCallback,db,colIndex,dbIndex){
+	var collectionName = randomString(10);
+	async.times(config.OBJECTS_NUMBER, function(k, nextObject){
+	  insertDocument(db, collectionName, config.FIELDS_NUMBER,config.ALLOW_SUBDOCS,
+	   function() {
+	      nextObject();
+	  });
+	},function(){
+		console.log('Collection '+ colIndex +' created for database ' + dbIndex + ' named '+collectionName);
+		// collection done
+		collectionDoneCallback();
 	});
 }
 
