@@ -5,15 +5,30 @@ var url = 'mongodb://localhost:27017';
 // config
 var config = {
 	DB_URL: 'mongodb://localhost:27017', // DB base URL
-	DATABASE_NUMBER:10, // db number
-	COLLECTIONS_NUMBER:10, // collections on each db
+	DATABASE_NUMBER:100, // db number
+	COLLECTIONS_NUMBER:100, // collections on each db
 	OBJECTS_NUMBER:10, // objects on each collection
 	FIELDS_NUMBER:5, // fields on each object
-	ALLOW_SUBDOCS:false // allow subdocuments on objects
+	ALLOW_SUBDOCS:false, // allow subdocuments on objects
+	MAX_CONCURRENCY:10 // max queue size
 }
 
+var q = async.queue(function (task, taskDoneCallback) {
+    populateDB(taskDoneCallback);
+}, config.MAX_CONCURRENCY);
 
 for(var i=0; i<config.DATABASE_NUMBER; i++){
+	q.push({});
+}
+
+// helper functions
+var insertDocument = function(db, collectionName,fields,allowSubdocs, callback) {
+   db.collection(collectionName).insertOne(createRandomObj(fields,allowSubdocs), function(err, result) {
+    callback();
+  });
+};
+
+var populateDB = function(taskDoneCallback) {
 	// random db
 	var dbName = config.DB_URL + '/' + randomString(10);
 	console.log('Populating ' + dbName +' database');
@@ -22,11 +37,13 @@ for(var i=0; i<config.DATABASE_NUMBER; i++){
 		async.times(config.COLLECTIONS_NUMBER, function(j, nextCollection){
 			var collectionName = randomString(10);
 			async.times(config.OBJECTS_NUMBER, function(k, nextObject){
-			  insertDocument(db, collectionName,config.FIELDS_NUMBER,config.ALLOW_SUBDOCS,
+			  insertDocument(db, collectionName, config.FIELDS_NUMBER,config.ALLOW_SUBDOCS,
 			   function() {
+			   	  console.log('document inserted');
 			      nextObject();
 			  });
 			},function(){
+				console.log('Collection created');
 				// objects completed
 				nextCollection();
 			});
@@ -34,16 +51,10 @@ for(var i=0; i<config.DATABASE_NUMBER; i++){
 		  // collections done, close DB
 		  console.log('Closing db for ' + db.databaseName);
 		  db.close();
+		  taskDoneCallback();
 		});
 	});
 }
-
-
-var insertDocument = function(db, collectionName,fields,allowSubdocs, callback) {
-   db.collection(collectionName).insertOne(createRandomObj(fields,allowSubdocs), function(err, result) {
-    callback();
-  });
-};
 
 var createRandomObj = function(fieldCount, allowNested) {
     var generatedObj = {};
